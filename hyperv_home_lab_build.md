@@ -178,12 +178,13 @@ Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private
 
 ```text
           ┌───────────────────────────────┐
-          │        Host (Win11)           │
+          │ Host (Win11)                  │
           │ vEthernet (LabInternalSwitch) |
-          │   IP: 192.168.50.1 (NAT)      │
+          │ IP: 192.168.50.1 (NAT)        │
           └─────────────┬─────────────────┘
                         │
-       ┌────────────────┼────────────────┐
+                        │
+       ┌─────────────────────────────────┐
        │                                 │
 ┌───────────────┐               ┌───────────────┐
 │ DC01          │               │ DC02          │
