@@ -11,13 +11,11 @@ This guide covers building a Hyper‑V home lab with Windows Server evaluation V
   - [Phase 1 — Hyper-V Infrastructure](#phase-1--hyper-v-infrastructure)
     - [1. Create a virtual switch](#1-create-a-virtual-switch)
       - [Internal switch (lab subnet + NAT)](#internal-switch-lab-subnet--nat)
-      - [Optional: External switch and VM NICs](#optional-external-switch-and-vm-nics)
     - [2. Create the domain controller VMs](#2-create-the-domain-controller-vms)
     - [3. Attach ISO and fix boot order](#3-attach-iso-and-fix-boot-order)
     - [4. VM networking config](#4-vm-networking-config)
     - [5. Rename and restart VMs](#5-rename-and-restart-vms)
     - [6. Enable inter-VM ping](#6-enable-inter-vm-ping)
-    - [Phase 1 network diagram](#phase-1-network-diagram)
   - [Phase 2 — Active Directory and DNS deployment](#phase-2--active-directory-and-dns-deployment)
     - [0. Variables](#0-variables)
     - [1. DC01 setup (forest root)](#1-dc01-setup-forest-root)
@@ -34,14 +32,10 @@ This guide covers building a Hyper‑V home lab with Windows Server evaluation V
     - [5. Sites and subnets](#5-sites-and-subnets)
     - [6. Health and replication checks](#6-health-and-replication-checks)
     - [Post-install hardening](#post-install-hardening)
-    - [Phase 2 domain diagram](#phase-2-domain-diagram)
     - [Optional: DHCP and client join](#optional-dhcp-and-client-join)
     - [Optional: NAT port mapping](#optional-nat-port-mapping)
     - [Optional: backup](#optional-backup)
   - [End state](#end-state)
-  - [Troubleshooting appendix](#troubleshooting-appendix)
-    - [Common DNS and replication issues](#common-dns-and-replication-issues)
-    - [Useful diagnostics](#useful-diagnostics)
 
 ---
 
@@ -70,22 +64,18 @@ Host (PowerShell):
 
 ```powershell
 Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart
+
+# Create a new virtual switch in Hyper-V
+# "Internal" means the host is part of the network, acting as the virtual switch
 New-VMSwitch -Name "LabInternalSwitch" -SwitchType Internal
-New-NetIPAddress -InterfaceAlias "vEthernet (LabInternalSwitch)" `
-                 -IPAddress 192.168.50.1 -PrefixLength 24
+
+# There should be a new network interface on the host as a result of the above command
+# This represents the virtual network, set the IP address and subnet mask
+# The virtual switch will act as the default gateway for the virtual network
+New-NetIPAddress -InterfaceAlias "vEthernet (LabInternalSwitch)" -IPAddress 192.168.50.1 -PrefixLength 24
+
+# NAT traffic from the virtual network for outbound internet connectivity
 New-NetNat -Name LabNAT -InternalIPInterfaceAddressPrefix 192.168.50.0/24
-```
-
-#### Optional: External switch and VM NICs
-
-Host (PowerShell):
-
-```powershell
-New-VMSwitch -Name "ExternalSwitch" -NetAdapterName "Ethernet" -AllowManagementOS $true
-
-# Optionally add a second NIC on each VM bridged to LAN
-Add-VMNetworkAdapter -VMName "DC01" -SwitchName "ExternalSwitch" -Name "LAN"
-Add-VMNetworkAdapter -VMName "DC02" -SwitchName "ExternalSwitch" -Name "LAN"
 ```
 
 ---
@@ -177,27 +167,6 @@ Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private
 
 ---
 
-### Phase 1 network diagram
-
-```text
-          ┌───────────────────────────────┐
-          │ Host (Win11)                  │
-          │ vEthernet (LabInternalSwitch) │
-          │ IP: 192.168.50.1 (NAT)        │
-          └─────────────┬─────────────────┘
-                        │
-                        │
-       ┌─────────────────────────────────┐
-       │                                 │
-┌───────────────┐               ┌───────────────┐
-│ DC01          │               │ DC02          │
-│ 192.168.50.2  │               │ 192.168.50.3  │
-│ GW: .1        │               │ GW: .1        │
-└───────────────┘               └───────────────┘
-```
-
----
-
 ## Phase 2 — Active Directory and DNS deployment
 
 ### 0. Variables
@@ -258,6 +227,7 @@ Install-ADDSForest -DomainName $DomainFqdn -DomainNetbiosName $NetbiosName `
 # Make sure DC01 advertises its SRV records and the zones are forest-scoped
 Set-DnsServerPrimaryZone -Name $DomainFqdn -ReplicationScope Forest
 Set-DnsServerPrimaryZone -Name "_msdcs.$DomainFqdn" -ReplicationScope Forest
+
 Restart-Service netlogon
 ipconfig /registerdns
 nltest /dsregdns
@@ -270,15 +240,23 @@ nltest /dsregdns
 Inside DC01 (PowerShell):
 
 ```powershell
+# Add reverse lookup zone for virtual network
+# Forward lookup zone was automatically created with forest
 Add-DnsServerPrimaryZone -NetworkId $SubnetCIDR -ReplicationScope Forest
+
+# Set replication scope to forest
 Set-DnsServerPrimaryZone -Name $DomainFqdn -DynamicUpdate Secure
 Set-DnsServerPrimaryZone -Name $DomainFqdn -ReplicationScope Forest
 Set-DnsServerPrimaryZone -Name "_msdcs.$DomainFqdn" -ReplicationScope Forest
+
+# Add forwarders
 Add-DnsServerForwarder -IPAddress $DnsForwarders
+
+# Enable scavenging
 Set-DnsServerScavenging -ScavengingState $true -RefreshInterval (New-TimeSpan -Days 7) `
   -NoRefreshInterval (New-TimeSpan -Days 7) -ScavengingInterval (New-TimeSpan -Days 7)
 
-# Enable zone-level aging for forward and reverse zones
+# Enable zone-level aging for forward zone
 Set-DnsServerZoneAging -Name $DomainFqdn -Aging $true -NoRefreshInterval (New-TimeSpan -Days 7) `
   -RefreshInterval (New-TimeSpan -Days 7)
 
@@ -288,8 +266,7 @@ $Octets = $Octets[0..($Octets.Length-2)]
 $OctetsReversed = foreach ($i in 0..($Octets.Length-1)) { $Octets[($Octets.Length-1) - $i] }
 $Prefix = $OctetsReversed -join '.'
 
-$RevZone = (Get-DnsServerZone | Where-Object { $_.IsReverseLookupZone -and $_.ZoneName -like "$Prefix.in-addr.arpa" } |
-  Select-Object -ExpandProperty ZoneName)
+$RevZone = (Get-DnsServerZone | Where-Object { $_.IsReverseLookupZone -and $_.ZoneName -like "$Prefix.in-addr.arpa" } | Select-Object -ExpandProperty ZoneName)
 If ($RevZone) {
   Set-DnsServerZoneAging -Name $RevZone -Aging $true -NoRefreshInterval (New-TimeSpan -Days 7) -RefreshInterval (New-TimeSpan -Days 7)
 }
@@ -331,13 +308,9 @@ Inside DC02 (PowerShell):
 ```powershell
 $Cred  = Get-Credential
 $Dsrm2 = Read-Host "Enter DSRM password for DC02" -AsSecureString
-Install-ADDSDomainController -DomainName $DomainFqdn -Credential $Cred `
-                             -InstallDNS -SafeModeAdministratorPassword $Dsrm2
-```
+Install-ADDSDomainController -DomainName $DomainFqdn -Credential $Cred -InstallDNS -SafeModeAdministratorPassword $Dsrm2
 
-> After the reboot, re-register SRV records on DC02
-
-```powershell
+# After the reboot, re-register SRV records on DC02
 Restart-Service netlogon
 ipconfig /registerdns
 nltest /dsregdns
@@ -363,19 +336,12 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,
 
 Run these after promoting DC02 and before configuring Sites/Subnets to ensure healthy multi-DC DNS and replication.
 
-Inside DC01 (PowerShell): Ensure forward and _msdcs zones replicate forest-wide.
-
-```powershell
-Set-DnsServerPrimaryZone -Name $DomainFqdn -ReplicationScope Forest
-Set-DnsServerPrimaryZone -Name "_msdcs.$DomainFqdn" -ReplicationScope Forest
-```
-
 Inside DC01 or DC02 (PowerShell): Verify NS records include both DCs; add missing NS if needed.
 
 ```powershell
 # Inspect NS records
-Get-DnsServerResourceRecord -ZoneName $DomainFqdn -RRType NS | Format-Table -Auto
-Get-DnsServerResourceRecord -ZoneName "_msdcs.$DomainFqdn" -RRType NS | Format-Table -Auto
+Get-DnsServerResourceRecord -ZoneName $DomainFqdn -RRType NS
+Get-DnsServerResourceRecord -ZoneName "_msdcs.$DomainFqdn" -RRType NS
 
 # Add DC02 as NS if absent
 Add-DnsServerResourceRecord -ZoneName $DomainFqdn -NS -Name "@" -NameServer "dc02.$DomainFqdn"
@@ -387,6 +353,7 @@ Inside DC01 and DC02 (PowerShell): Ensure DNS client order is self first, partne
 ```powershell
 # On DC01
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC1IP,$DC2IP)
+
 # On DC02
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,$DC1IP)
 ```
@@ -470,23 +437,6 @@ Enable-PSRemoting -Force
 
 - Updates: From each DC, run `sconfig` and install all updates, then reboot.
 
-### Phase 2 domain diagram
-
-```text
-                         ┌─────────────────────┐
-                         │ winlab.com          │
-                         │ NetBIOS: WINLAB     │
-                         └────────────┬────────┘
-                                      │
-       ┌──────────────────────────────┼───────────────────────────┐
-       │                              │                           │
- ┌───────────────┐             ┌───────────────┐        ┌───────────────┐
- │ DC01          │             │ DC02          │        │ Clients       │
- │ 192.168.50.2  │◄─replicate─►│ 192.168.50.3  │        │ DHCP / Static │
- │ AD DS + DNS   │             │ AD DS + DNS   │        │ Use DC01/DC02 │
- └───────────────┘             └───────────────┘        └───────────────┘
-```
-
 ---
 
 ### Optional: DHCP and client join
@@ -546,57 +496,3 @@ wbadmin start systemstatebackup -backuptarget:E: -quiet
 - Clients configured to use DC01/DC02 for DNS and authentication.
 
 ---
-
-## Troubleshooting appendix
-
-### Common DNS and replication issues
-
-- **1908 / 8524 errors (Could not find domain controller / DNS lookup failure)**
-  - Ensure both `winlab.com` and `_msdcs.winlab.com` zones replicate **Forest-wide**.
-  - Confirm NS records include **both DC01 and DC02**.
-  - Restart Netlogon and re-register DNS records:
-
-    ```powershell
-    Restart-Service netlogon
-    ipconfig /registerdns
-    nltest /dsregdns
-    ```
-
-- **DomainAuthenticationKind shows `None` instead of `DomainAuthenticated`**
-  - Run:
-
-    ```powershell
-    Get-NetConnectionProfile | Select-Object Name,NetworkCategory,DomainAuthenticationKind
-    ```
-
-  - If not DomainAuthenticated, verify DNS settings, then reboot.
-
-- **Replication errors persist**
-  - Force KCC recalculation and sync:
-
-    ```powershell
-    repadmin /kcc
-    repadmin /syncall /AdeP
-    repadmin /replsummary
-    ```
-
-- **Time sync issues (Kerberos failures)**
-  - Verify the PDC emulator syncs with external NTP:
-
-    ```powershell
-    w32tm /query /status
-    w32tm /resync /force
-    ```
-
-### Useful diagnostics
-
-```powershell
-# Verify DC discovery
-nltest /dsgetdc:winlab.com
-
-# Show replication partners
-repadmin /showrepl
-
-# Run DNS diagnostic tests
-Dcdiag /test:dns /v
-```
