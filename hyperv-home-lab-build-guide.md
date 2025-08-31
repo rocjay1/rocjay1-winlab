@@ -43,6 +43,7 @@ Build a Hyper-V home lab with Windows Server evaluation VMs, NAT networking, and
     - [6. Health and replication checks](#6-health-and-replication-checks)
     - [Post-install hardening](#post-install-hardening)
     - [Optional: DHCP and client join](#optional-dhcp-and-client-join)
+      - [Client join (PowerShell as Administrator)](#client-join-powershell-as-administrator)
     - [Optional: NAT port mapping](#optional-nat-port-mapping)
     - [Optional: backup](#optional-backup)
   - [End state](#end-state)
@@ -144,6 +145,7 @@ Set-VMFirmware -VMName "DC02" -FirstBootDevice (Get-VMDvdDrive -VMName "DC02")
 ### 4. VM networking config
 
 > **Run on:** Inside each VM (PowerShell)
+
 > **Important:** Don’t point DCs at public DNS during promotion. DC01 uses **itself**; DC02 uses **DC01** until promoted.
 
 <details><summary><strong>Show commands</strong></summary>
@@ -382,6 +384,7 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,
 ### 4. DNS and replication checks
 
 > **Goal:** Ensure both DCs are authoritative (NS records present), and A/PTR/SRV are fresh.
+
 > **Run on:** Inside DC01 **or** DC02 (PowerShell)
 
 ```powershell
@@ -435,7 +438,7 @@ repadmin /showrepl
 
 > **PDC time source:** First DC (DC01) is the PDC by default; make it authoritative for time and disable Hyper-V time sync on the **PDC VM only**.
 
-**Inside DC01 (PowerShell)**
+> **Run on:** Inside DC01 (PowerShell)
 
 ```powershell
 (Get-ADDomain).PDCEmulator
@@ -446,7 +449,7 @@ Restart-Service w32time
 w32tm /resync /force
 ```
 
-**Host (PowerShell)**
+> **Run on:** Host (PowerShell)
 
 ```powershell
 Disable-VMIntegrationService -VMName "DC01" -Name "Time Synchronization"
@@ -460,7 +463,7 @@ Disable-VMIntegrationService -VMName "DC01" -Name "Time Synchronization"
 
 > **Run on:** Inside DC01 (PowerShell)
 
-<details><summary><strong>Show DHCP commands</strong></summary>
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 Install-WindowsFeature DHCP -IncludeManagementTools
@@ -471,13 +474,71 @@ Set-DhcpServerv4OptionValue -ScopeId 192.168.50.0 -Router $Gateway -DnsServer $D
 
 </details>
 
-> **DHCP options:** 003 = gateway, 006 = DNS servers, 015 = DNS suffix. Point clients at **DCs** for DNS to find SRV records.
+> By default, domain-joined clients register their **A** record themselves, but **PTR** (reverse) is typically handled by **DHCP**. To ensure both A and PTR records exist even for non-domain or
+legacy clients, configure DHCP to always perform dynamic updates and give it credentials for secure updates.
+> **Run on:** Inside DC01 (PowerShell)
 
-**Client join (PowerShell as Administrator)**
+<details><summary><strong>Show commands</strong></summary>
+
+**Server-wide (applies to all IPv4 scopes)**
 
 ```powershell
-Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses $DC1IP,$DC2IP
+# Always dynamically update DNS records (A + PTR), remove stale records at lease expiry,
+# and update for older/legacy clients that don't request it explicitly
+Set-DhcpServerv4DnsSetting -DynamicUpdates Always `
+  -DeleteDnsRROnLeaseExpiry $true `
+  -UpdateDnsRRForOlderClients $true
+```
+
+**Per-scope (override or set on a single scope)**
+
+```powershell
+$ScopeId = "192.168.50.0"  # network ID of your scope
+Set-DhcpServerv4DnsSetting -ScopeId $ScopeId -DynamicUpdates Always `
+  -DeleteDnsRROnLeaseExpiry $true `
+  -UpdateDnsRRForOlderClients $true
+```
+
+**Credentials for secure updates**
+
+```powershell
+# (Run in an elevated PowerShell on a DC)
+New-ADUser -Name "dhcpdns" -SamAccountName "dhcpdns" -AccountPassword (Read-Host -AsSecureString "Password") -Enabled $true
+# Optional but common in labs: prevent password expiry for this service account
+Set-ADUser dhcpdns -PasswordNeverExpires $true
+
+# (Run on the DHCP server) — store credentials for DNS updates
+$cred = Get-Credential "WINLAB\dhcpdns"
+Set-DhcpServerDnsCredential -Credential $cred
+```
+
+**Verify**
+
+```powershell
+Get-DhcpServerv4DnsSetting                    # server-wide settings
+Get-DhcpServerv4DnsSetting -ScopeId $ScopeId  # per-scope (if set)
+Get-DhcpServerDnsCredential                   # shows stored account used for updates
+```
+
+</details>
+
+> **DHCP options:** 003 = gateway, 006 = DNS servers, 015 = DNS suffix. Point clients at **DCs** for DNS to find SRV records.
+
+#### Client join (PowerShell as Administrator)
+
+> **Run on:** Client (PowerShell as Administrator)
+
+```powershell
 Add-Computer -DomainName $DomainFqdn -Credential "$NetbiosName\Administrator" -Restart
+```
+
+On a client, renew the lease to trigger DHCP → DNS updates (including PTR):
+
+```powershell
+ipconfig /release
+ipconfig /renew
+ipconfig /flushdns
+ipconfig /registerdns  # refresh A from client side (PTR handled by DHCP)
 ```
 
 ---
