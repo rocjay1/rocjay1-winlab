@@ -15,14 +15,14 @@ This guide covers building a Hyper‑V home lab with Windows Server evaluation V
     - [3. Attach ISO and fix boot order](#3-attach-iso-and-fix-boot-order)
     - [4. VM networking config](#4-vm-networking-config)
     - [5. Rename and restart VMs](#5-rename-and-restart-vms)
-    - [6. Enable inter-VM ping](#6-enable-inter-vm-ping)
+    - [6. Enable basic connectivity and remote management](#6-enable-basic-connectivity-and-remote-management)
   - [Phase 2 — Active Directory and DNS deployment](#phase-2--active-directory-and-dns-deployment)
     - [0. Variables](#0-variables)
     - [1. DC01 setup (forest root)](#1-dc01-setup-forest-root)
       - [Networking](#networking)
       - [Install roles](#install-roles)
       - [Create forest](#create-forest)
-    - [2. DC01 DNS post-config](#2-dc01-dns-post-config)
+      - [Post-reboot: DNS configuration](#post-reboot-dns-configuration)
     - [3. DC02 setup (additional DC)](#3-dc02-setup-additional-dc)
       - [Networking](#networking-1)
       - [Install roles](#install-roles-1)
@@ -50,7 +50,8 @@ This guide covers building a Hyper‑V home lab with Windows Server evaluation V
 ## Conventions
 
 - “Host (PowerShell)” means run on the Hyper‑V host. “Inside DC01/DC02 (PowerShell)” means run inside that VM.
-- Network interface alias in VMs may vary (e.g., `Ethernet`, `Ethernet 2`). Adjust `-InterfaceAlias` accordingly.
+
+> **Why these settings?** This guide favors clarity over defaults: the Internal switch keeps lab traffic isolated; NAT on the host provides internet; static IPs guarantee predictable DC addresses; and DNS on DCs enables AD features (SRV/NS records, secure dynamic updates).
 
 ---
 
@@ -64,17 +65,22 @@ Host (PowerShell):
 
 ```powershell
 Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart
+# Note: a reboot is typically required after enabling Hyper-V.
 
-# Create a new virtual switch in Hyper-V
-# "Internal" means the host is part of the network, acting as the virtual switch
+# Create a new virtual switch in Hyper-V.
+# An "Internal" switch connects VMs to each other AND to the host (via a host vEthernet NIC).
+# It does NOT connect to the external LAN unless you add routing/NAT on the host.
 New-VMSwitch -Name "LabInternalSwitch" -SwitchType Internal
 
-# There should be a new network interface on the host as a result of the above command
-# This represents the virtual network, set the IP address and subnet mask
-# The virtual switch will act as the default gateway for the virtual network
-New-NetIPAddress -InterfaceAlias "vEthernet (LabInternalSwitch)" -IPAddress 192.168.50.1 -PrefixLength 24
+# The host now has a new NIC: vEthernet (LabInternalSwitch).
+# Assign the host an IP on the lab subnet. This will be used as the VMs' default gateway
+# IF (and only if) we configure NAT on the host.
+New-NetIPAddress -InterfaceAlias "vEthernet (LabInternalSwitch)" `
+                 -IPAddress 192.168.50.1 -PrefixLength 24
 
-# NAT traffic from the virtual network for outbound internet connectivity
+# Enable NAT so VMs in 192.168.50.0/24 can reach the internet via the host's external NIC.
+# The host (IP 192.168.50.1) effectively becomes the default gateway for that subnet.
+# Note: only one NAT can exist per internal prefix; ensure no duplicate NATs for 192.168.50.0/24.
 New-NetNat -Name LabNAT -InternalIPInterfaceAddressPrefix 192.168.50.0/24
 ```
 
@@ -119,8 +125,7 @@ Set-VMFirmware -VMName "DC02" -FirstBootDevice (Get-VMDvdDrive -VMName "DC02")
 
 Assign static IPs and gateway inside each VM. DNS will be configured in Phase 2.
 
-- DC01 → `192.168.50.2/24`, gateway `192.168.50.1`
-- DC02 → `192.168.50.3/24`, gateway `192.168.50.1`
+> **DNS on VMs**: don’t point DCs at public DNS (e.g., 8.8.8.8). During promotion, a DC must resolve AD SRV records locally; we set DC01 to use itself, and DC02 to use DC01 until it’s promoted.
 
 Inside DC01 (PowerShell):
 
@@ -154,15 +159,28 @@ Rename-Computer -NewName "DC02" -Restart
 
 ---
 
-### 6. Enable inter-VM ping
-
-On both DCs:
+### 6. Enable basic connectivity and remote management
 
 Inside DC01 and DC02 (PowerShell):
 
 ```powershell
-Enable-NetFirewallRule -Name FPS-ICMP4-ERQ-In
+# Set profile to Private so discovery/sharing rules can apply
 Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private
+
+# Allow ICMP echo (ping)
+Set-NetFirewallRule -Name FPS-ICMP4-ERQ-In -Profile Private -Enabled True
+Set-NetFirewallRule -Name FPS-ICMP6-ERQ-In -Profile Private -Enabled True
+
+# Enable Remote Desktop
+Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
+# Allow RDP logons (terminal services toggle)
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
+
+# Enable PowerShell Remoting (WinRM HTTP 5985)
+Enable-PSRemoting -Force
+
+# Enable File and Printer Sharing (SMB, etc.)
+Enable-NetFirewallRule -DisplayGroup 'File and Printer Sharing'
 ```
 
 ---
@@ -174,22 +192,23 @@ Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private
 Inside DC01 and DC02 (PowerShell):
 
 ```powershell
-$DomainFqdn   = "winlab.com"
-$NetbiosName  = "WINLAB"
-$SubnetCIDR   = "192.168.50.0/24"
+$DomainFqdn  = "winlab.com"
+$NetbiosName = "WINLAB"
+$SubnetCIDR  = "192.168.50.0/24"
 
-$DC1          = "DC01"
-$DC2          = "DC02"
-$DC1IP        = "192.168.50.2"
-$DC2IP        = "192.168.50.3"
+$DC1   = "DC01"
+$DC2   = "DC02"
+$DC1IP = "192.168.50.2"
+$DC2IP = "192.168.50.3"
 
 $PrefixLength  = 24
 $Gateway       = "192.168.50.1"
 $DnsForwarders = @("1.1.1.1","8.8.8.8")
 
-$Interface    = (Get-NetAdapter | Where-Object Status -eq Up |
-                 Select-Object -First 1 -ExpandProperty Name)
+$Interface = (Get-NetAdapter | Where-Object Status -eq Up | Select-Object -First 1 -ExpandProperty Name)
 ```
+
+> **Forwarders**: these are upstream public resolvers for unknown names; they belong on the **DNS server** (zones forward out), not on the DC NIC’s DNS client list.
 
 ---
 
@@ -202,6 +221,8 @@ Inside DC01 (PowerShell):
 ```powershell
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 ```
+
+> **Self-first DNS**: DC01 points to itself so Netlogon can publish SRV records in its own DNS and clients can find it during promotion.
 
 #### Install roles
 
@@ -217,39 +238,30 @@ Inside DC01 (PowerShell):
 
 ```powershell
 $Dsrm = Read-Host "Enter DSRM password" -AsSecureString
-Install-ADDSForest -DomainName $DomainFqdn -DomainNetbiosName $NetbiosName `
-                   -InstallDNS -SafeModeAdministratorPassword $Dsrm
+Install-ADDSForest -DomainName $DomainFqdn -DomainNetbiosName $NetbiosName -InstallDNS -SafeModeAdministratorPassword $Dsrm
 ```
 
-**Post-reboot (DC01): register Netlogon/DNS records and ensure zone scope is forest-wide**
-
-```powershell
-# Make sure DC01 advertises its SRV records and the zones are forest-scoped
-Set-DnsServerPrimaryZone -Name $DomainFqdn -ReplicationScope Forest
-Set-DnsServerPrimaryZone -Name "_msdcs.$DomainFqdn" -ReplicationScope Forest
-
-Restart-Service netlogon
-ipconfig /registerdns
-nltest /dsregdns
-```
-
----
-
-### 2. DC01 DNS post-config
+#### Post-reboot: DNS configuration
 
 Inside DC01 (PowerShell):
 
 ```powershell
+# Make sure the zones are forest-scoped
+Set-DnsServerPrimaryZone -Name $DomainFqdn -ReplicationScope Forest -DynamicUpdate Secure  # secure updates + forest-wide visibility
+Set-DnsServerPrimaryZone -Name "_msdcs.$DomainFqdn" -ReplicationScope Forest -DynamicUpdate Secure  # forest-wide SRV + GUID records
+
+# Make sure DC01 advertises its SRV records
+# Verify SRV (service locator) records so DCs/clients can find LDAP/Kerberos
+Resolve-DnsName -Type SRV _ldap._tcp.dc._msdcs.winlab.com
+Restart-Service netlogon
+ipconfig /registerdns
+nltest /dsregdns
+
 # Add reverse lookup zone for virtual network
 # Forward lookup zone was automatically created with forest
+# Reverse zone enables PTR lookups and scavenging; optional but recommended
 Add-DnsServerPrimaryZone -NetworkId $SubnetCIDR -ReplicationScope Forest
 
-# Set replication scope to forest
-Set-DnsServerPrimaryZone -Name $DomainFqdn -DynamicUpdate Secure
-Set-DnsServerPrimaryZone -Name $DomainFqdn -ReplicationScope Forest
-Set-DnsServerPrimaryZone -Name "_msdcs.$DomainFqdn" -ReplicationScope Forest
-
-# Add forwarders
 Add-DnsServerForwarder -IPAddress $DnsForwarders
 
 # Enable scavenging
@@ -272,9 +284,9 @@ If ($RevZone) {
 }
 ```
 
-Verify:
+> **What these do**: `-ReplicationScope Forest` makes zones replicate to all DNS servers in the forest; `-DynamicUpdate Secure` lets only authenticated machines update their A/PTR/SRV records (prevents spoofing). The `_msdcs` zone holds forest-wide **SRV** and **DC GUID CNAME** records used by clients and DC replication.
 
-Inside DC01 (PowerShell):
+Verify:
 
 ```powershell
 Resolve-DnsName $DC1
@@ -292,6 +304,8 @@ Inside DC02 (PowerShell):
 ```powershell
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 ```
+
+> **Before promotion**: DC02 queries DC01 for `_msdcs` SRV records; after promotion we’ll switch DC02 to self-first.
 
 #### Install roles
 
@@ -311,6 +325,8 @@ $Dsrm2 = Read-Host "Enter DSRM password for DC02" -AsSecureString
 Install-ADDSDomainController -DomainName $DomainFqdn -Credential $Cred -InstallDNS -SafeModeAdministratorPassword $Dsrm2
 
 # After the reboot, re-register SRV records on DC02
+# Confirm DC02 now appears in SRV answers
+Resolve-DnsName -Type SRV _ldap._tcp.dc._msdcs.winlab.com
 Restart-Service netlogon
 ipconfig /registerdns
 nltest /dsregdns
@@ -330,6 +346,8 @@ Inside DC02 (PowerShell):
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,$DC1IP)
 ```
 
+> **DNS order**: each DC should list **itself first, partner second**. This avoids a single point of failure if one DC is down.
+
 ---
 
 ### 4. DNS and replication checks
@@ -347,6 +365,8 @@ Get-DnsServerResourceRecord -ZoneName "_msdcs.$DomainFqdn" -RRType NS
 Add-DnsServerResourceRecord -ZoneName $DomainFqdn -NS -Name "@" -NameServer "dc02.$DomainFqdn"
 Add-DnsServerResourceRecord -ZoneName "_msdcs.$DomainFqdn" -NS -Name "@" -NameServer "dc02.$DomainFqdn"
 ```
+
+> **NS records**: identify which DNS servers are *authoritative* for the zone. Ensure both DC01 and DC02 are listed for `winlab.com` and `_msdcs.winlab.com`.
 
 Inside DC01 and DC02 (PowerShell): Ensure DNS client order is self first, partner second.
 
@@ -366,6 +386,8 @@ ipconfig /registerdns
 nltest /dsregdns
 ```
 
+> **Netlogon refresh kit**: restart Netlogon + re-register A/PTR/SRV to fix missing/old records after promotion.
+
 Inside DC01 and DC02 (PowerShell): Confirm the network profile is DomainAuthenticated; if not, fix DNS and reboot.
 
 ```powershell
@@ -373,6 +395,8 @@ Get-NetConnectionProfile | Select-Object Name,NetworkCategory,DomainAuthenticati
 # If not DomainAuthenticated, verify DNS, then:
 Restart-Computer
 ```
+
+> **NLA state**: on healthy DCs, `DomainAuthenticationKind` should show `DomainAuthenticated`. If it stays `None`, recheck DNS/SRV and restart `nlasvc`.
 
 ---
 
@@ -390,6 +414,8 @@ Move-ADDirectoryServer -Identity $DC2 -Site "HQ"
 ---
 
 ### 6. Health and replication checks
+
+> **Replication quick tests**: DC discovery, summary health, and per-partition inbound neighbors.
 
 Inside DC01 or DC02 (PowerShell):
 
@@ -425,15 +451,7 @@ Host (PowerShell):
 Disable-VMIntegrationService -VMName "DC01" -Name "Time Synchronization"
 ```
 
-- Remote management: Enable RDP and PowerShell remoting on both DCs.
-
-Inside DC01 and DC02 (PowerShell):
-
-```powershell
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
-Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
-Enable-PSRemoting -Force
-```
+> **Why disable Hyper‑V time sync on the PDC?** The PDC should be the time source for the forest; Hyper‑V time sync can fight w32time and cause drift.
 
 - Updates: From each DC, run `sconfig` and install all updates, then reboot.
 
@@ -452,7 +470,9 @@ Add-DhcpServerv4Scope -Name "Lab" -StartRange 192.168.50.50 -EndRange 192.168.50
 Set-DhcpServerv4OptionValue -ScopeId 192.168.50.0 -Router $Gateway -DnsServer $DC1IP,$DC2IP -DnsDomain $DomainFqdn
 ```
 
-Join a Windows client:
+> **DHCP options**: 003 = default gateway, 006 = DNS servers, 015 = DNS suffix. Point clients at the DCs for DNS so they can find SRV records.
+
+Join a Windows client.
 
 On the client (PowerShell as Administrator):
 
@@ -472,7 +492,7 @@ Add-NetNatStaticMapping -NatName "LabNAT" -Protocol TCP -ExternalIPAddress 0.0.0
 Add-NetNatStaticMapping -NatName "LabNAT" -Protocol TCP -ExternalIPAddress 0.0.0.0 -ExternalPort 53390 -InternalIPAddress $DC2IP -InternalPort 3389
 ```
 
-> Security note: Limit exposure to your LAN only and consider firewall rules.
+> Security note: Limit exposure to your LAN only (bind ExternalIPAddress to your LAN IP, not 0.0.0.0) and consider host/guest firewall rules.
 
 ### Optional: backup
 
@@ -496,3 +516,5 @@ wbadmin start systemstatebackup -backuptarget:E: -quiet
 - Clients configured to use DC01/DC02 for DNS and authentication.
 
 ---
+
+> **If something feels off**: check `_msdcs` SRV records, NS records, and DNS client order on both DCs; 90% of AD lab issues trace back to these three.
