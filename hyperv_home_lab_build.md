@@ -51,8 +51,6 @@ This guide covers building a Hyper‑V home lab with Windows Server evaluation V
 
 - “Host (PowerShell)” means run on the Hyper‑V host. “Inside DC01/DC02 (PowerShell)” means run inside that VM.
 
-> **Why these settings?** This guide favors clarity over defaults: the Internal switch keeps lab traffic isolated; NAT on the host provides internet; static IPs guarantee predictable DC addresses; and DNS on DCs enables AD features (SRV/NS records, secure dynamic updates).
-
 ---
 
 ## Phase 1 — Hyper-V Infrastructure
@@ -125,7 +123,7 @@ Set-VMFirmware -VMName "DC02" -FirstBootDevice (Get-VMDvdDrive -VMName "DC02")
 
 Assign static IPs and gateway inside each VM. DNS will be configured in Phase 2.
 
-> **DNS on VMs**: don’t point DCs at public DNS (e.g., 8.8.8.8). During promotion, a DC must resolve AD SRV records locally; we set DC01 to use itself, and DC02 to use DC01 until it’s promoted.
+Don’t point DCs at public DNS (e.g., 8.8.8.8). During promotion, a DC must resolve AD SRV records locally; we set DC01 to use itself, and DC02 to use DC01 until it’s promoted.
 
 Inside DC01 (PowerShell):
 
@@ -208,8 +206,6 @@ $DnsForwarders = @("1.1.1.1","8.8.8.8")
 $Interface = (Get-NetAdapter | Where-Object Status -eq Up | Select-Object -First 1 -ExpandProperty Name)
 ```
 
-> **Forwarders**: these are upstream public resolvers for unknown names; they belong on the **DNS server** (zones forward out), not on the DC NIC’s DNS client list.
-
 ---
 
 ### 1. DC01 setup (forest root)
@@ -221,8 +217,6 @@ Inside DC01 (PowerShell):
 ```powershell
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 ```
-
-> **Self-first DNS**: DC01 points to itself so Netlogon can publish SRV records in its own DNS and clients can find it during promotion.
 
 #### Install roles
 
@@ -253,6 +247,7 @@ Set-DnsServerPrimaryZone -Name "_msdcs.$DomainFqdn" -ReplicationScope Forest -Dy
 # Make sure DC01 advertises its SRV records
 # Verify SRV (service locator) records so DCs/clients can find LDAP/Kerberos
 Resolve-DnsName -Type SRV _ldap._tcp.dc._msdcs.winlab.com
+# If needed:
 Restart-Service netlogon
 ipconfig /registerdns
 nltest /dsregdns
@@ -284,9 +279,9 @@ If ($RevZone) {
 }
 ```
 
-> **What these do**: `-ReplicationScope Forest` makes zones replicate to all DNS servers in the forest; `-DynamicUpdate Secure` lets only authenticated machines update their A/PTR/SRV records (prevents spoofing). The `_msdcs` zone holds forest-wide **SRV** and **DC GUID CNAME** records used by clients and DC replication.
+`-ReplicationScope Forest` makes zones replicate to all DNS servers in the forest; `-DynamicUpdate Secure` lets only authenticated machines update their A/PTR/SRV records (prevents spoofing). The `_msdcs` zone holds forest-wide **SRV** and **DC GUID CNAME** records used by clients and DC replication.
 
-Verify:
+Inside DC01 (PowerShell): Verify.
 
 ```powershell
 Resolve-DnsName $DC1
@@ -305,7 +300,7 @@ Inside DC02 (PowerShell):
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 ```
 
-> **Before promotion**: DC02 queries DC01 for `_msdcs` SRV records; after promotion we’ll switch DC02 to self-first.
+DC02 queries DC01 for `_msdcs` SRV records; after promotion we’ll switch DC02 to self-first.
 
 #### Install roles
 
@@ -324,9 +319,9 @@ $Cred  = Get-Credential
 $Dsrm2 = Read-Host "Enter DSRM password for DC02" -AsSecureString
 Install-ADDSDomainController -DomainName $DomainFqdn -Credential $Cred -InstallDNS -SafeModeAdministratorPassword $Dsrm2
 
-# After the reboot, re-register SRV records on DC02
 # Confirm DC02 now appears in SRV answers
 Resolve-DnsName -Type SRV _ldap._tcp.dc._msdcs.winlab.com
+# If needed:
 Restart-Service netlogon
 ipconfig /registerdns
 nltest /dsregdns
@@ -346,7 +341,7 @@ Inside DC02 (PowerShell):
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,$DC1IP)
 ```
 
-> **DNS order**: each DC should list **itself first, partner second**. This avoids a single point of failure if one DC is down.
+**DNS order**: each DC should list **itself first, partner second**. This avoids a single point of failure if one DC is down.
 
 ---
 
@@ -354,7 +349,10 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,
 
 Run these after promoting DC02 and before configuring Sites/Subnets to ensure healthy multi-DC DNS and replication.
 
-Inside DC01 or DC02 (PowerShell): Verify NS records include both DCs; add missing NS if needed.
+Verify NS records include both DCs; add missing NS if needed. NS Records identify which DNS servers are *authoritative* for the zone.
+Ensure both DC01 and DC02 are listed for `winlab.com` and `_msdcs.winlab.com`.
+
+Inside DC01 or DC02 (PowerShell):
 
 ```powershell
 # Inspect NS records
@@ -366,19 +364,7 @@ Add-DnsServerResourceRecord -ZoneName $DomainFqdn -NS -Name "@" -NameServer "dc0
 Add-DnsServerResourceRecord -ZoneName "_msdcs.$DomainFqdn" -NS -Name "@" -NameServer "dc02.$DomainFqdn"
 ```
 
-> **NS records**: identify which DNS servers are *authoritative* for the zone. Ensure both DC01 and DC02 are listed for `winlab.com` and `_msdcs.winlab.com`.
-
-Inside DC01 and DC02 (PowerShell): Ensure DNS client order is self first, partner second.
-
-```powershell
-# On DC01
-Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC1IP,$DC2IP)
-
-# On DC02
-Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,$DC1IP)
-```
-
-Inside DC01 and DC02 (PowerShell): Re-register Netlogon/DNS SRV records.
+Inside DC01 and DC02 (PowerShell): Re-register Netlogon/DNS SRV records if needed.
 
 ```powershell
 Restart-Service netlogon
@@ -396,7 +382,7 @@ Get-NetConnectionProfile | Select-Object Name,NetworkCategory,DomainAuthenticati
 Restart-Computer
 ```
 
-> **NLA state**: on healthy DCs, `DomainAuthenticationKind` should show `DomainAuthenticated`. If it stays `None`, recheck DNS/SRV and restart `nlasvc`.
+**NLA state**: on healthy DCs, `DomainAuthenticationKind` should show `DomainAuthenticated`. If it stays `None`, recheck DNS/SRV and restart `nlasvc`.
 
 ---
 
@@ -414,8 +400,6 @@ Move-ADDirectoryServer -Identity $DC2 -Site "HQ"
 ---
 
 ### 6. Health and replication checks
-
-> **Replication quick tests**: DC discovery, summary health, and per-partition inbound neighbors.
 
 Inside DC01 or DC02 (PowerShell):
 
@@ -451,7 +435,7 @@ Host (PowerShell):
 Disable-VMIntegrationService -VMName "DC01" -Name "Time Synchronization"
 ```
 
-> **Why disable Hyper‑V time sync on the PDC?** The PDC should be the time source for the forest; Hyper‑V time sync can fight w32time and cause drift.
+The PDC should be the time source for the forest; Hyper‑V time sync can fight w32time and cause drift.
 
 - Updates: From each DC, run `sconfig` and install all updates, then reboot.
 
@@ -472,9 +456,7 @@ Set-DhcpServerv4OptionValue -ScopeId 192.168.50.0 -Router $Gateway -DnsServer $D
 
 > **DHCP options**: 003 = default gateway, 006 = DNS servers, 015 = DNS suffix. Point clients at the DCs for DNS so they can find SRV records.
 
-Join a Windows client.
-
-On the client (PowerShell as Administrator):
+On the client (PowerShell as Administrator): Join a Windows client.
 
 ```powershell
 Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses $DC1IP,$DC2IP
