@@ -86,8 +86,7 @@ Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRes
 New-VMSwitch -Name "LabInternalSwitch" -SwitchType Internal
 
 # Give the host vEthernet NIC a gateway IP on the lab subnet.
-New-NetIPAddress -InterfaceAlias "vEthernet (LabInternalSwitch)" `
-                 -IPAddress 192.168.50.1 -PrefixLength 24
+New-NetIPAddress -InterfaceAlias "vEthernet (LabInternalSwitch)" -IPAddress 192.168.50.1 -PrefixLength 24
 
 # NAT so 192.168.50.0/24 can reach the internet via the host.
 New-NetNat -Name LabNAT -InternalIPInterfaceAddressPrefix 192.168.50.0/24
@@ -153,15 +152,13 @@ Set-VMFirmware -VMName "DC02" -FirstBootDevice (Get-VMDvdDrive -VMName "DC02")
 **Inside DC01**
 
 ```powershell
-New-NetIPAddress -InterfaceAlias "Ethernet" `
-  -IPAddress 192.168.50.2 -PrefixLength 24 -DefaultGateway 192.168.50.1
+New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.50.2 -PrefixLength 24 -DefaultGateway 192.168.50.1
 ```
 
 **Inside DC02**
 
 ```powershell
-New-NetIPAddress -InterfaceAlias "Ethernet" `
-  -IPAddress 192.168.50.3 -PrefixLength 24 -DefaultGateway 192.168.50.1
+New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.50.3 -PrefixLength 24 -DefaultGateway 192.168.50.1
 ```
 
 </details>
@@ -206,8 +203,7 @@ Set-NetFirewallRule -Name FPS-ICMP6-ERQ-In -Profile Private -Enabled True
 
 # Enable Remote Desktop.
 Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-  -Name fDenyTSConnections -Value 0
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
 
 # PowerShell Remoting (WinRM 5985).
 Enable-PSRemoting -Force
@@ -311,12 +307,15 @@ Add-DnsServerPrimaryZone -NetworkId $SubnetCIDR -ReplicationScope Forest
 # Forwarders and scavenging.
 Add-DnsServerForwarder -IPAddress $DnsForwarders
 Set-DnsServerScavenging -ScavengingState $true `
-  -RefreshInterval (New-TimeSpan -Days 7) -NoRefreshInterval (New-TimeSpan -Days 7) `
+  -RefreshInterval (New-TimeSpan -Days 7) `
+  -NoRefreshInterval (New-TimeSpan -Days 7) `
   -ScavengingInterval (New-TimeSpan -Days 7)
 
 # Zone-level aging for forward zone.
-Set-DnsServerZoneAging -Name $DomainFqdn -Aging $true `
-  -NoRefreshInterval (New-TimeSpan -Days 7) -RefreshInterval (New-TimeSpan -Days 7)
+Set-DnsServerZoneAging -Name $DomainFqdn `
+  -Aging $true `
+  -NoRefreshInterval (New-TimeSpan -Days 7) `
+  -RefreshInterval (New-TimeSpan -Days 7)
 
 # Find reverse zone name and enable aging.
 $Octets = $SubnetCIDR -split '\.'
@@ -599,8 +598,19 @@ ipconfig /registerdns  # refresh A from client side (PTR handled by DHCP)
 <details><summary><strong>Show commands</strong></summary>
 
 ```powershell
-Add-NetNatStaticMapping -NatName "LabNAT" -Protocol TCP -ExternalIPAddress 0.0.0.0 -ExternalPort 53389 -InternalIPAddress $DC1IP -InternalPort 3389
-Add-NetNatStaticMapping -NatName "LabNAT" -Protocol TCP -ExternalIPAddress 0.0.0.0 -ExternalPort 53390 -InternalIPAddress $DC2IP -InternalPort 3389
+Add-NetNatStaticMapping -NatName "LabNAT" `
+  -Protocol TCP `
+  -ExternalIPAddress 0.0.0.0 `
+  -ExternalPort 53389 `
+  -InternalIPAddress $DC1IP `
+  -InternalPort 3389
+
+Add-NetNatStaticMapping -NatName "LabNAT" `
+  -Protocol TCP `
+  -ExternalIPAddress 0.0.0.0 `
+  -ExternalPort 53389 `
+  -InternalIPAddress $DC2IP `
+  -InternalPort 3389
 ```
 
 </details>
