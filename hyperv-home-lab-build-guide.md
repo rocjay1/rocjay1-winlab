@@ -105,15 +105,15 @@ New-NetNat -Name LabNAT -InternalIPInterfaceAddressPrefix 192.168.50.0/24
 ```powershell
 # DC01
 New-VM -Name "DC01" -Generation 2 -MemoryStartupBytes 4GB `
-       -SwitchName "LabInternalSwitch" `
-       -NewVHDPath "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\DC01.vhdx" `
-       -NewVHDSizeBytes 60GB
+  -SwitchName "LabInternalSwitch" `
+  -NewVHDPath "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\DC01.vhdx" `
+  -NewVHDSizeBytes 60GB
 
 # DC02
 New-VM -Name "DC02" -Generation 2 -MemoryStartupBytes 4GB `
-       -SwitchName "LabInternalSwitch" `
-       -NewVHDPath "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\DC02.vhdx" `
-       -NewVHDSizeBytes 60GB
+  -SwitchName "LabInternalSwitch" `
+  -NewVHDPath "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\DC02.vhdx" `
+  -NewVHDSizeBytes 60GB
 
 # Attach ISO and fix boot order
 Add-VMDvdDrive -VMName "DC01" -Path "C:\ProgramData\Microsoft\Windows\ISOs\WindowsServer2025.iso"
@@ -229,7 +229,7 @@ $DC2IP = "192.168.50.3"
 
 $PrefixLength  = 24
 $Gateway       = "192.168.50.1"
-$DnsForwarders = @("1.1.1.1","8.8.8.8")
+$DnsForwarders = @("1.1.1.1", "8.8.8.8")
 
 $Interface = (Get-NetAdapter | Where-Object Status -eq Up | Select-Object -First 1 -ExpandProperty Name)
 ```
@@ -272,7 +272,11 @@ Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
 
 ```powershell
 $Dsrm = Read-Host "Enter DSRM password" -AsSecureString
-Install-ADDSForest -DomainName $DomainFqdn -DomainNetbiosName $NetbiosName -InstallDNS -SafeModeAdministratorPassword $Dsrm
+Install-ADDSForest `
+  -DomainName $DomainFqdn `
+  -DomainNetbiosName $NetbiosName `
+  -InstallDNS `
+  -SafeModeAdministratorPassword $Dsrm
 ```
 
 </details>
@@ -376,7 +380,11 @@ Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
 ```powershell
 $Cred  = Get-Credential
 $Dsrm2 = Read-Host "Enter DSRM password for DC02" -AsSecureString
-Install-ADDSDomainController -DomainName $DomainFqdn -Credential $Cred -InstallDNS -SafeModeAdministratorPassword $Dsrm2
+Install-ADDSDomainController `
+  -DomainName $DomainFqdn `
+  -Credential $Cred `
+  -InstallDNS `
+  -SafeModeAdministratorPassword $Dsrm2
 
 # Confirm DC02 now appears in SRV answers.
 Resolve-DnsName -Type SRV _ldap._tcp.dc._msdcs.winlab.com
