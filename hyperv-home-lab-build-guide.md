@@ -255,26 +255,38 @@ $Interface = (Get-NetAdapter | Where-Object Status -eq Up | Select-Object -First
 
 > **Run on:** Inside DC01 (PowerShell)
 
+<details><summary><strong>Show commands</strong></summary>
+
 ```powershell
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 ```
+
+</details>
 
 #### Install roles
 
 > **Run on:** Inside DC01 (PowerShell)
 
+<details><summary><strong>Show commands</strong></summary>
+
 ```powershell
 Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
 ```
+
+</details>
 
 #### Create forest
 
 > **Run on:** Inside DC01 (PowerShell)
 
+<details><summary><strong>Show commands</strong></summary>
+
 ```powershell
 $Dsrm = Read-Host "Enter DSRM password" -AsSecureString
 Install-ADDSForest -DomainName $DomainFqdn -DomainNetbiosName $NetbiosName -InstallDNS -SafeModeAdministratorPassword $Dsrm
 ```
+
+</details>
 
 #### Post-reboot: DNS configuration
 
@@ -335,9 +347,13 @@ dcdiag /test:dns /v
 
 > **Run on:** Inside DC02 (PowerShell)
 
+<details><summary><strong>Show commands</strong></summary>
+
 ```powershell
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 ```
+
+</details>
 
 > **Note:** DC02 queries DC01 for `_msdcs` SRV records; after promotion we’ll set DC02 to **self-first**.
 
@@ -345,13 +361,19 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 
 > **Run on:** Inside DC02 (PowerShell)
 
+<details><summary><strong>Show commands</strong></summary>
+
 ```powershell
 Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
 ```
 
+</details>
+
 #### Promote as domain controller
 
 > **Run on:** Inside DC02 (PowerShell)
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 $Cred  = Get-Credential
@@ -365,9 +387,13 @@ ipconfig /registerdns
 nltest /dsregdns
 ```
 
+</details>
+
 #### Finalize DNS clients
 
 > **Run on:** Inside DC01 and DC02 (PowerShell)
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 # DC01: self first, partner second
@@ -376,6 +402,8 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC1IP,
 # DC02: self first, partner second
 Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,$DC1IP)
 ```
+
+</details>
 
 > **DNS order:** Each DC lists **itself first, partner second** to avoid a single point of failure.
 
@@ -386,6 +414,8 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,
 > **Goal:** Ensure both DCs are authoritative (NS records present), and A/PTR/SRV are fresh.
 
 > **Run on:** Inside DC01 **or** DC02 (PowerShell)
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 # Inspect NS records
@@ -407,11 +437,15 @@ Get-NetConnectionProfile | Select-Object Name,NetworkCategory,DomainAuthenticati
 Restart-Computer
 ```
 
+</details>
+
 ---
 
 ### 5. Sites and subnets
 
 > **Run on:** Inside DC01 **or** DC02 (PowerShell)
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 New-ADReplicationSite "HQ"
@@ -420,17 +454,23 @@ Move-ADDirectoryServer -Identity $DC1 -Site "HQ"
 Move-ADDirectoryServer -Identity $DC2 -Site "HQ"
 ```
 
+</details>
+
 ---
 
 ### 6. Health and replication checks
 
 > **Run on:** Inside DC01 **or** DC02 (PowerShell)
 
+<details><summary><strong>Show commands</strong></summary>
+
 ```powershell
 nltest /dsgetdc:$DomainFqdn
 repadmin /replsummary
 repadmin /showrepl
 ```
+
+</details>
 
 ---
 
@@ -439,6 +479,8 @@ repadmin /showrepl
 > **PDC time source:** First DC (DC01) is the PDC by default; make it authoritative for time and disable Hyper-V time sync on the **PDC VM only**.
 
 > **Run on:** Inside DC01 (PowerShell)
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 (Get-ADDomain).PDCEmulator
@@ -449,11 +491,17 @@ Restart-Service w32time
 w32tm /resync /force
 ```
 
+</details>
+
 > **Run on:** Host (PowerShell)
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 Disable-VMIntegrationService -VMName "DC01" -Name "Time Synchronization"
 ```
+
+</details>
 
 > **Updates:** On each DC, run `sconfig`, install all updates, reboot.
 
@@ -528,11 +576,17 @@ Get-DhcpServerDnsCredential                   # shows stored account used for up
 
 > **Run on:** Client (PowerShell as Administrator)
 
+<details><summary><strong>Show commands</strong></summary>
+
 ```powershell
 Add-Computer -DomainName $DomainFqdn -Credential "$NetbiosName\Administrator" -Restart
 ```
 
+</details>
+
 On a client, renew the lease to trigger DHCP → DNS updates (including PTR):
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 ipconfig /release
@@ -540,6 +594,8 @@ ipconfig /renew
 ipconfig /flushdns
 ipconfig /registerdns  # refresh A from client side (PTR handled by DHCP)
 ```
+
+</details>
 
 ---
 
@@ -564,11 +620,15 @@ Add-NetNatStaticMapping -NatName "LabNAT" -Protocol TCP -ExternalIPAddress 0.0.0
 
 > **Run on:** Inside each DC (PowerShell)
 
+<details><summary><strong>Show commands</strong></summary>
+
 ```powershell
 Install-WindowsFeature Windows-Server-Backup
 # Example: system state backup to E: (external disk or mapped share)
 wbadmin start systemstatebackup -backuptarget:E: -quiet
 ```
+
+</details>
 
 ---
 
