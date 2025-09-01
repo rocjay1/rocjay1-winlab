@@ -19,35 +19,35 @@ Build a Hyper-V home lab with Windows Server evaluation VMs, NAT networking, and
   - [Table of Contents](#table-of-contents)
   - [Prerequisites](#prerequisites)
   - [Conventions](#conventions)
-  - [Phase 1 — Hyper-V Infrastructure](#phase-1--hyper-v-infrastructure)
+  - [Phase 1 — Hyper-V Infrastructure](#phase-1-hyper-v-infrastructure)
     - [1. Create a virtual switch](#1-create-a-virtual-switch)
     - [2. Create the domain controller VMs](#2-create-the-domain-controller-vms)
-    - [4. VM networking config](#4-vm-networking-config)
-    - [5. Rename and restart VMs](#5-rename-and-restart-vms)
-    - [6. Enable basic connectivity and remote management](#6-enable-basic-connectivity-and-remote-management)
-  - [Phase 2 — Active Directory and DNS deployment](#phase-2--active-directory-and-dns-deployment)
+    - [3. VM Networking Config](#3-vm-networking-config)
+    - [4. Rename and Restart VMs](#4-rename-and-restart-vms)
+    - [5. Enable Basic Connectivity and Remote Management](#5-enable-basic-connectivity-and-remote-management)
+  - [Phase 2 — Active Directory and DNS Deployment](#phase-2-active-directory-and-dns-deployment)
     - [0. Variables](#0-variables)
-    - [1. DC01 setup (forest root)](#1-dc01-setup-forest-root)
+    - [1. DC01 Setup (Forest Root)](#1-dc01-setup-forest-root)
       - [Networking](#networking)
-      - [Install roles](#install-roles)
-      - [Create forest](#create-forest)
-      - [DNS configuration](#dns-configuration)
-    - [3. DC02 setup (additional DC)](#3-dc02-setup-additional-dc)
+      - [Install Roles](#install-roles)
+      - [Create Forest](#create-forest)
+      - [DNS Configuration](#dns-configuration)
+    - [2. DC02 Setup (Additional DC)](#2-dc02-setup-additional-dc)
       - [Networking](#networking-1)
-      - [Install roles](#install-roles-1)
-      - [Promote as domain controller](#promote-as-domain-controller)
-    - [4. Finalize DNS](#4-finalize-dns)
-      - [DC DNS client settings](#dc-dns-client-settings)
-      - [Confirm domain records](#confirm-domain-records)
-    - [5. Sites and subnets](#5-sites-and-subnets)
-    - [6. Health and replication checks](#6-health-and-replication-checks)
-    - [Post-install hardening](#post-install-hardening)
-    - [Optional: DHCP and client join](#optional-dhcp-and-client-join)
-      - [Client join (PowerShell as Administrator)](#client-join-powershell-as-administrator)
-    - [Optional: NAT port mapping](#optional-nat-port-mapping)
-    - [Optional: backup](#optional-backup)
-  - [End state](#end-state)
-  - [Troubleshooting quick hits](#troubleshooting-quick-hits)
+      - [Install Roles](#install-roles-1)
+      - [Promote as Domain Controller](#promote-as-domain-controller)
+    - [3. Finalize DNS](#3-finalize-dns)
+      - [DC DNS Client Settings](#dc-dns-client-settings)
+      - [Confirm Domain Records](#confirm-domain-records)
+    - [4. Sites and Subnets](#4-sites-and-subnets)
+    - [5. Health and Replication Checks](#5-health-and-replication-checks)
+    - [Post-Install Hardening](#post-install-hardening)
+    - [Optional: DHCP and Client Join](#optional-dhcp-and-client-join)
+      - [Client Join (PowerShell as Administrator)](#client-join-powershell-as-administrator)
+    - [Optional: NAT Port Mapping](#optional-nat-port-mapping)
+    - [Optional: Backup](#optional-backup)
+  - [End State](#end-state)
+  - [Troubleshooting Quick Hits](#troubleshooting-quick-hits)
 
 ---
 
@@ -130,7 +130,7 @@ Set-VMFirmware -VMName "DC02" -FirstBootDevice (Get-VMDvdDrive -VMName "DC02")
 
 ---
 
-### 4. VM networking config
+### 3. VM Networking Config
 
 > **Important:** Don’t point DCs at public DNS during promotion. DC01 uses **itself**; DC02 uses **DC01** until promoted.
 
@@ -156,7 +156,7 @@ New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.50.3 -PrefixLengt
 
 ---
 
-### 5. Rename and restart VMs
+### 4. Rename and Restart VMs
 
 > **Run on:** DC01 (PowerShell)
 
@@ -168,7 +168,7 @@ Rename-Computer -NewName "DC01" -Restart
 
 </details>
 
-> **Run on:** DC01 (PowerShell)
+> **Run on:** DC02 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -180,7 +180,7 @@ Rename-Computer -NewName "DC02" -Restart
 
 ---
 
-### 6. Enable basic connectivity and remote management
+### 5. Enable Basic Connectivity and Remote Management
 
 > **Run on:** DC01 **and** DC02 (PowerShell)
 
@@ -209,7 +209,7 @@ Enable-NetFirewallRule -DisplayGroup 'File and Printer Sharing'
 
 ---
 
-## Phase 2 — Active Directory and DNS deployment
+## Phase 2 — Active Directory and DNS Deployment
 
 ### 0. Variables
 
@@ -238,7 +238,7 @@ $Interface = (Get-NetAdapter | Where-Object Status -eq Up | Select-Object -First
 
 ---
 
-### 1. DC01 setup (forest root)
+### 1. DC01 Setup (Forest Root)
 
 #### Networking
 
@@ -252,7 +252,7 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 
 </details>
 
-#### Install roles
+#### Install Roles
 
 > **Run on:** DC01 (PowerShell)
 
@@ -264,7 +264,7 @@ Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
 
 </details>
 
-#### Create forest
+#### Create Forest
 
 > **Run on:** DC01 (PowerShell)
 
@@ -277,7 +277,7 @@ Install-ADDSForest -DomainName $DomainFqdn -DomainNetbiosName $NetbiosName -Inst
 
 </details>
 
-#### DNS configuration
+#### DNS Configuration
 
 > **Run on:** DC01 (PowerShell)
 
@@ -339,7 +339,7 @@ dcdiag /test:dns /v
 
 ---
 
-### 3. DC02 setup (additional DC)
+### 2. DC02 Setup (Additional DC)
 
 #### Networking
 
@@ -355,7 +355,7 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 
 > **Note:** DC02 queries DC01 for `_msdcs` SRV records; after promotion we’ll set DC02 to **self-first**.
 
-#### Install roles
+#### Install Roles
 
 > **Run on:** DC02 (PowerShell)
 
@@ -367,7 +367,7 @@ Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
 
 </details>
 
-#### Promote as domain controller
+#### Promote as Domain Controller
 
 > **Run on:** DC02 (PowerShell)
 
@@ -389,9 +389,9 @@ nltest /dsregdns
 
 ---
 
-### 4. Finalize DNS
+### 3. Finalize DNS
 
-#### DC DNS client settings
+#### DC DNS Client Settings
 
 > **Run on:** DC01 and DC02 (PowerShell)
 
@@ -409,7 +409,7 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,
 
 > **DNS order:** Each DC lists **itself first, partner second** to avoid a single point of failure.
 
-#### Confirm domain records
+#### Confirm Domain Records
 
 > **Goal:** Ensure both DCs are authoritative (NS records present), and A/PTR/SRV are fresh.
 
@@ -441,7 +441,7 @@ Restart-Computer
 
 ---
 
-### 5. Sites and subnets
+### 4. Sites and Subnets
 
 > **Run on:** DC01 (PowerShell)
 
@@ -458,7 +458,7 @@ Move-ADDirectoryServer -Identity $DC2 -Site "HQ"
 
 ---
 
-### 6. Health and replication checks
+### 5. Health and Replication Checks
 
 > **Run on:** DC01 **and** DC02 (PowerShell)
 
@@ -474,7 +474,7 @@ repadmin /showrepl
 
 ---
 
-### Post-install hardening
+### Post-Install Hardening
 
 > **PDC time source:** First DC (DC01) is the PDC by default; make it authoritative for time and disable Hyper-V time sync on the **PDC VM only**.
 
@@ -507,7 +507,7 @@ Disable-VMIntegrationService -VMName "DC01" -Name "Time Synchronization"
 
 ---
 
-### Optional: DHCP and client join
+### Optional: DHCP and Client Join
 
 > **Run on:** DC01 (PowerShell)
 
@@ -569,7 +569,7 @@ Get-DhcpServerDnsCredential                   # shows stored account used for up
 
 > **DHCP options:** 003 = gateway, 006 = DNS servers, 015 = DNS suffix. Point clients at **DCs** for DNS to find SRV records.
 
-#### Client join (PowerShell as Administrator)
+#### Client Join (PowerShell as Administrator)
 
 > **Run on:** Client (PowerShell as Administrator)
 
@@ -589,7 +589,7 @@ ipconfig /registerdns  # refresh A from client side (PTR handled by DHCP)
 
 ---
 
-### Optional: NAT port mapping
+### Optional: NAT Port Mapping
 
 > **Run on:** Host (PowerShell)
 
@@ -617,7 +617,7 @@ Add-NetNatStaticMapping -NatName "LabNAT" `
 
 ---
 
-### Optional: backup
+### Optional: Backup
 
 > **Run on:** Inside each DC (PowerShell)
 
@@ -633,7 +633,7 @@ wbadmin start systemstatebackup -backuptarget:E: -quiet
 
 ---
 
-## End state
+## End State
 
 - Hyper-V host with **Internal NAT subnet** (`192.168.50.0/24`).
 - Two VMs (`DC01`, `DC02`) running Windows Server Eval.
@@ -644,7 +644,7 @@ wbadmin start systemstatebackup -backuptarget:E: -quiet
 
 ---
 
-## Troubleshooting quick hits
+## Troubleshooting Quick Hits
 
 - Check `_msdcs` **SRV** records, **NS** records, and **DNS client order** on both DCs—most AD lab issues trace back here.
 - If `DomainAuthenticationKind` ≠ `DomainAuthenticated`, fix DNS/SRV, restart `nlasvc`, and/or reboot.
