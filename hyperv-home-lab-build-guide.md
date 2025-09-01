@@ -22,7 +22,6 @@ Build a Hyper-V home lab with Windows Server evaluation VMs, NAT networking, and
   - [Phase 1 — Hyper-V Infrastructure](#phase-1--hyper-v-infrastructure)
     - [1. Create a virtual switch](#1-create-a-virtual-switch)
     - [2. Create the domain controller VMs](#2-create-the-domain-controller-vms)
-    - [3. Attach ISO and fix boot order](#3-attach-iso-and-fix-boot-order)
     - [4. VM networking config](#4-vm-networking-config)
     - [5. Rename and restart VMs](#5-rename-and-restart-vms)
     - [6. Enable basic connectivity and remote management](#6-enable-basic-connectivity-and-remote-management)
@@ -32,13 +31,14 @@ Build a Hyper-V home lab with Windows Server evaluation VMs, NAT networking, and
       - [Networking](#networking)
       - [Install roles](#install-roles)
       - [Create forest](#create-forest)
-      - [Post-reboot: DNS configuration](#post-reboot-dns-configuration)
+      - [DNS configuration](#dns-configuration)
     - [3. DC02 setup (additional DC)](#3-dc02-setup-additional-dc)
       - [Networking](#networking-1)
       - [Install roles](#install-roles-1)
       - [Promote as domain controller](#promote-as-domain-controller)
-      - [Finalize DNS clients](#finalize-dns-clients)
-    - [4. DNS and replication checks](#4-dns-and-replication-checks)
+    - [4. Finalize DNS](#4-finalize-dns)
+      - [DC DNS client settings](#dc-dns-client-settings)
+      - [Confirm domain records](#confirm-domain-records)
     - [5. Sites and subnets](#5-sites-and-subnets)
     - [6. Health and replication checks](#6-health-and-replication-checks)
     - [Post-install hardening](#post-install-hardening)
@@ -114,23 +114,12 @@ New-VM -Name "DC02" -Generation 2 -MemoryStartupBytes 4GB `
        -SwitchName "LabInternalSwitch" `
        -NewVHDPath "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\DC02.vhdx" `
        -NewVHDSizeBytes 60GB
-```
 
-</details>
-
----
-
-### 3. Attach ISO and fix boot order
-
-> **Run on:** Host (PowerShell)
-
-<details><summary><strong>Show commands</strong></summary>
-
-```powershell
+# Attach ISO and fix boot order
 Add-VMDvdDrive -VMName "DC01" -Path "C:\ProgramData\Microsoft\Windows\ISOs\WindowsServer2025.iso"
 Add-VMDvdDrive -VMName "DC02" -Path "C:\ProgramData\Microsoft\Windows\ISOs\WindowsServer2025.iso"
 
-# Prefer explicit DVD first-boot device.
+# Prefer explicit DVD first-boot device
 Set-VMFirmware -VMName "DC01" -FirstBootDevice (Get-VMDvdDrive -VMName "DC01")
 Set-VMFirmware -VMName "DC02" -FirstBootDevice (Get-VMDvdDrive -VMName "DC02")
 ```
@@ -143,19 +132,21 @@ Set-VMFirmware -VMName "DC02" -FirstBootDevice (Get-VMDvdDrive -VMName "DC02")
 
 ### 4. VM networking config
 
-> **Run on:** Inside each VM (PowerShell)
-
 > **Important:** Don’t point DCs at public DNS during promotion. DC01 uses **itself**; DC02 uses **DC01** until promoted.
 
-<details><summary><strong>Show commands</strong></summary>
+> **Run on:** DC01 (PowerShell)
 
-**Inside DC01**
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.50.2 -PrefixLength 24 -DefaultGateway 192.168.50.1
 ```
 
-**Inside DC02**
+</details>
+
+> **Run on:** DC02 (PowerShell)
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.50.3 -PrefixLength 24 -DefaultGateway 192.168.50.1
@@ -167,17 +158,19 @@ New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.50.3 -PrefixLengt
 
 ### 5. Rename and restart VMs
 
-> **Run on:** Inside each VM (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
-
-**Inside DC01**
 
 ```powershell
 Rename-Computer -NewName "DC01" -Restart
 ```
 
-**Inside DC02**
+</details>
+
+> **Run on:** DC01 (PowerShell)
+
+<details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 Rename-Computer -NewName "DC02" -Restart
@@ -189,7 +182,7 @@ Rename-Computer -NewName "DC02" -Restart
 
 ### 6. Enable basic connectivity and remote management
 
-> **Run on:** Inside DC01 **and** DC02 (PowerShell)
+> **Run on:** DC01 **and** DC02 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -220,7 +213,7 @@ Enable-NetFirewallRule -DisplayGroup 'File and Printer Sharing'
 
 ### 0. Variables
 
-> **Run on:** Inside DC01 **and** DC02 (PowerShell)
+> **Run on:** DC01 **and** DC02 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -249,7 +242,7 @@ $Interface = (Get-NetAdapter | Where-Object Status -eq Up | Select-Object -First
 
 #### Networking
 
-> **Run on:** Inside DC01 (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -261,7 +254,7 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 
 #### Install roles
 
-> **Run on:** Inside DC01 (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -273,7 +266,7 @@ Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
 
 #### Create forest
 
-> **Run on:** Inside DC01 (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -284,9 +277,9 @@ Install-ADDSForest -DomainName $DomainFqdn -DomainNetbiosName $NetbiosName -Inst
 
 </details>
 
-#### Post-reboot: DNS configuration
+#### DNS configuration
 
-> **Run on:** Inside DC01 (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -323,13 +316,19 @@ $Octets = $Octets[0..($Octets.Length-2)]
 $OctetsReversed = foreach ($i in 0..($Octets.Length-1)) { $Octets[($Octets.Length-1) - $i] }
 $Prefix = $OctetsReversed -join '.'
 
-$RevZone = (Get-DnsServerZone | Where-Object { $_.IsReverseLookupZone -and $_.ZoneName -like "$Prefix.in-addr.arpa" } | Select-Object -ExpandProperty ZoneName)
+$RevZone = (
+  Get-DnsServerZone | 
+  Where-Object { $_.IsReverseLookupZone -and $_.ZoneName -like "$Prefix.in-addr.arpa" } | 
+  Select-Object -ExpandProperty ZoneName
+)
 If ($RevZone) {
-  Set-DnsServerZoneAging -Name $RevZone -Aging $true `
-    -NoRefreshInterval (New-TimeSpan -Days 7) -RefreshInterval (New-TimeSpan -Days 7)
+  Set-DnsServerZoneAging -Name $RevZone `
+    -Aging $true `
+    -NoRefreshInterval (New-TimeSpan -Days 7) `
+    -RefreshInterval (New-TimeSpan -Days 7)
 }
 
-# Verify.
+# Verify results.
 Resolve-DnsName $DC1
 dcdiag /test:dns /v
 ```
@@ -344,7 +343,7 @@ dcdiag /test:dns /v
 
 #### Networking
 
-> **Run on:** Inside DC02 (PowerShell)
+> **Run on:** DC02 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -358,7 +357,7 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses $DC1IP
 
 #### Install roles
 
-> **Run on:** Inside DC02 (PowerShell)
+> **Run on:** DC02 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -370,7 +369,7 @@ Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
 
 #### Promote as domain controller
 
-> **Run on:** Inside DC02 (PowerShell)
+> **Run on:** DC02 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -388,9 +387,13 @@ nltest /dsregdns
 
 </details>
 
-#### Finalize DNS clients
+---
 
-> **Run on:** Inside DC01 and DC02 (PowerShell)
+### 4. Finalize DNS
+
+#### DC DNS client settings
+
+> **Run on:** DC01 and DC02 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -406,13 +409,11 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,
 
 > **DNS order:** Each DC lists **itself first, partner second** to avoid a single point of failure.
 
----
-
-### 4. DNS and replication checks
+#### Confirm domain records
 
 > **Goal:** Ensure both DCs are authoritative (NS records present), and A/PTR/SRV are fresh.
 
-> **Run on:** Inside DC01 **or** DC02 (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -442,7 +443,7 @@ Restart-Computer
 
 ### 5. Sites and subnets
 
-> **Run on:** Inside DC01 **or** DC02 (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -459,7 +460,7 @@ Move-ADDirectoryServer -Identity $DC2 -Site "HQ"
 
 ### 6. Health and replication checks
 
-> **Run on:** Inside DC01 **or** DC02 (PowerShell)
+> **Run on:** DC01 **and** DC02 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -477,7 +478,7 @@ repadmin /showrepl
 
 > **PDC time source:** First DC (DC01) is the PDC by default; make it authoritative for time and disable Hyper-V time sync on the **PDC VM only**.
 
-> **Run on:** Inside DC01 (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
@@ -508,14 +509,18 @@ Disable-VMIntegrationService -VMName "DC01" -Name "Time Synchronization"
 
 ### Optional: DHCP and client join
 
-> **Run on:** Inside DC01 (PowerShell)
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
 ```powershell
 Install-WindowsFeature DHCP -IncludeManagementTools
 Add-DhcpServerInDC -DnsName "DC01.$DomainFqdn" -IpAddress $DC1IP
-Add-DhcpServerv4Scope -Name "Lab" -StartRange 192.168.50.50 -EndRange 192.168.50.200 -SubnetMask 255.255.255.0 -State Active
+Add-DhcpServerv4Scope -Name "Lab" `
+  -StartRange 192.168.50.50 `
+  -EndRange 192.168.50.200 `
+  -SubnetMask 255.255.255.0 `
+  -State Active
 Set-DhcpServerv4OptionValue -ScopeId 192.168.50.0 -Router $Gateway -DnsServer $DC1IP,$DC2IP -DnsDomain $DomainFqdn
 ```
 
@@ -523,32 +528,28 @@ Set-DhcpServerv4OptionValue -ScopeId 192.168.50.0 -Router $Gateway -DnsServer $D
 
 > By default, domain-joined clients register their **A** record themselves, but **PTR** (reverse) is typically handled by **DHCP**. To ensure both A and PTR records exist even for non-domain or
 legacy clients, configure DHCP to always perform dynamic updates and give it credentials for secure updates.
-> **Run on:** Inside DC01 (PowerShell)
+
+> **Run on:** DC01 (PowerShell)
 
 <details><summary><strong>Show commands</strong></summary>
 
-**Server-wide (applies to all IPv4 scopes)**
-
 ```powershell
+# Server-wide (applies to all IPv4 scopes)
 # Always dynamically update DNS records (A + PTR), remove stale records at lease expiry,
 # and update for older/legacy clients that don't request it explicitly
 Set-DhcpServerv4DnsSetting -DynamicUpdates Always `
   -DeleteDnsRROnLeaseExpiry $true `
   -UpdateDnsRRForOlderClients $true
-```
 
-**Per-scope (override or set on a single scope)**
+# OR
 
-```powershell
+# Per-scope (override or set on a single scope)
 $ScopeId = "192.168.50.0"  # network ID of your scope
 Set-DhcpServerv4DnsSetting -ScopeId $ScopeId -DynamicUpdates Always `
   -DeleteDnsRROnLeaseExpiry $true `
   -UpdateDnsRRForOlderClients $true
-```
 
-**Credentials for secure updates**
-
-```powershell
+# Credentials for secure updates
 # (Run in an elevated PowerShell on a DC)
 New-ADUser -Name "dhcpdns" -SamAccountName "dhcpdns" -AccountPassword (Read-Host -AsSecureString "Password") -Enabled $true
 # Optional but common in labs: prevent password expiry for this service account
@@ -557,11 +558,8 @@ Set-ADUser dhcpdns -PasswordNeverExpires $true
 # (Run on the DHCP server) — store credentials for DNS updates
 $cred = Get-Credential "WINLAB\dhcpdns"
 Set-DhcpServerDnsCredential -Credential $cred
-```
 
-**Verify**
-
-```powershell
+# Verify
 Get-DhcpServerv4DnsSetting                    # server-wide settings
 Get-DhcpServerv4DnsSetting -ScopeId $ScopeId  # per-scope (if set)
 Get-DhcpServerDnsCredential                   # shows stored account used for updates
