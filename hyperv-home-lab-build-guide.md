@@ -330,7 +330,7 @@ If ($RevZone) {
     -NoRefreshInterval (New-TimeSpan -Days 7) -RefreshInterval (New-TimeSpan -Days 7)
 }
 
-# Verify
+# Verify.
 Resolve-DnsName $DC1
 dcdiag /test:dns /v
 ```
@@ -418,15 +418,15 @@ Set-DnsClientServerAddress -InterfaceAlias $Interface -ServerAddresses @($DC2IP,
 <details><summary><strong>Show commands</strong></summary>
 
 ```powershell
-# Inspect NS records
+# Inspect NS records.
 Get-DnsServerResourceRecord -ZoneName $DomainFqdn -RRType NS
 Get-DnsServerResourceRecord -ZoneName "_msdcs.$DomainFqdn" -RRType NS
 
-# Add DC02 as NS if absent
+# Add DC02 as NS if absent.
 Add-DnsServerResourceRecord -ZoneName $DomainFqdn -NS -Name "@" -NameServer "dc02.$DomainFqdn"
 Add-DnsServerResourceRecord -ZoneName "_msdcs.$DomainFqdn" -NS -Name "@" -NameServer "dc02.$DomainFqdn"
 
-# Re-register Netlogon/DNS SRV if needed (run on both DCs)
+# Re-register Netlogon/DNS SRV if needed (run on both DCs).
 Restart-Service netlogon
 ipconfig /registerdns
 nltest /dsregdns
@@ -580,15 +580,8 @@ Get-DhcpServerDnsCredential                   # shows stored account used for up
 
 ```powershell
 Add-Computer -DomainName $DomainFqdn -Credential "$NetbiosName\Administrator" -Restart
-```
 
-</details>
-
-On a client, renew the lease to trigger DHCP → DNS updates (including PTR):
-
-<details><summary><strong>Show commands</strong></summary>
-
-```powershell
+# Renew lease if needed:
 ipconfig /release
 ipconfig /renew
 ipconfig /flushdns
