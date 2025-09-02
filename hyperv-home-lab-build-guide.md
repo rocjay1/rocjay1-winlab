@@ -1,7 +1,5 @@
 # Hyper-V Home Lab Build Guide
 
-Build a Hyper-V home lab with Windows Server evaluation VMs, NAT networking, and a two-DC Active Directory domain (`winlab.com`).
-
 > **At-a-glance IP plan**
 >
 > | Item    | Value              |
@@ -19,13 +17,13 @@ Build a Hyper-V home lab with Windows Server evaluation VMs, NAT networking, and
   - [Table of Contents](#table-of-contents)
   - [Prerequisites](#prerequisites)
   - [Conventions](#conventions)
-  - [Phase 1 — Hyper-V Infrastructure](#phase-1-hyper-v-infrastructure)
+  - [Phase 1 — Hyper-V Infrastructure](#phase-1--hyper-v-infrastructure)
     - [1. Create a virtual switch](#1-create-a-virtual-switch)
     - [2. Create the domain controller VMs](#2-create-the-domain-controller-vms)
     - [3. VM Networking Config](#3-vm-networking-config)
     - [4. Rename and Restart VMs](#4-rename-and-restart-vms)
     - [5. Enable Basic Connectivity and Remote Management](#5-enable-basic-connectivity-and-remote-management)
-  - [Phase 2 — Active Directory and DNS Deployment](#phase-2-active-directory-and-dns-deployment)
+  - [Phase 2 — Active Directory and DNS Deployment](#phase-2--active-directory-and-dns-deployment)
     - [0. Variables](#0-variables)
     - [1. DC01 Setup (Forest Root)](#1-dc01-setup-forest-root)
       - [Networking](#networking)
