@@ -3,10 +3,36 @@ $name = 'Server01'
 
 # Create the new VM in Hyper-V
 # Run from host
-New-VM -Name $name -Generation 2 -MemoryStartupBytes 4GB `
-  -SwitchName "LabInternalSwitch" `
-  -NewVHDPath "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\$name.vhdx" `
-  -NewVHDSizeBytes 60GB
+<#
+This script previously contained inline steps to create a VM and configure it.
+Those steps have been refactored into the new `servers/` folder as idempotent
+join scripts. Use the wrappers under `servers/` inside the VM to finish join and
+configuration tasks.
+
+Examples:
+
+On the host, create the VM (example):
+
+  $name = 'Server01'
+  New-VM -Name $name -Generation 2 -MemoryStartupBytes 4GB -SwitchName 'LabInternalSwitch' -NewVHDPath "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\$name.vhdx" -NewVHDSizeBytes 60GB
+  Add-VMDvdDrive -VMName $name -Path 'C:\ProgramData\Microsoft\Windows\ISOs\WindowsServer2025.iso'
+  Set-VMFirmware -VMName $name -FirstBootDevice (Get-VMDvdDrive -VMName $name)
+
+Then, inside the VM (as Administrator) run the appropriate wrapper:
+
+  # inside Server01 VM
+  pwsh -NoProfile -ExecutionPolicy Bypass -File C:\Path\To\repo\servers\server01-join.ps1
+
+  # inside Server02 VM
+  pwsh -NoProfile -ExecutionPolicy Bypass -File C:\Path\To\repo\servers\server02-join.ps1
+
+Or run the generic join script with parameters:
+
+  pwsh -NoProfile -ExecutionPolicy Bypass -File C:\Path\To\repo\servers\server-join.ps1 -NewName Server01 -StaticIP 192.168.50.11 -DnsServers '192.168.50.2,192.168.50.3'
+
+#>
+
+Write-Host 'See servers/server-join.ps1 and wrappers in servers/ for the new workflow.'
 
 Add-VMDvdDrive -VMName $name -Path "C:\ProgramData\Microsoft\Windows\ISOs\WindowsServer2025.iso"
 
